@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robert AI Mail</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Google Fonts for premium feel -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Main Email List Area -->
+        <main class="email-feed" id="email-feed">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Robert is checking your mail...</p>
+            </div>
+            <!-- Emails inject here -->
+        </main>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="user-profile" id="user-profile">
+                <span id="user-email-display">Not logged in</span>
+                <button class="btn-logout" onclick="logout()">Logout</button>
+            </div>
+
+            <div class="sidebar-content hidden" id="sidebar-content">
+                <div class="ai-summary-card">
+                    <h2>AI Summary</h2>
+                    <p id="summary-text">Select an email to see summary.</p>
+                    <div id="importance-badge" class="badge"></div>
+                </div>
+
+                <div class="actions-card">
+                    <h3>Actions</h3>
+
+                    <div id="autofill-container" class="autofill-container hidden">
+                        <div class="autofill-label">AI Suggestions:</div>
+                        <div class="autofill-chips">
+                            <button id="btn-autofill-dont" class="chip chip-dont" onclick="applyAutofill('dont')">Don't
+                                Show</button>
+                            <button id="btn-autofill-always" class="chip chip-always"
+                                onclick="applyAutofill('always')">Always Show</button>
+                        </div>
+                    </div>
+                    <textarea id="memory-input" placeholder="Additional information for Robert.."></textarea>
+
+                    <div class="button-group">
+                        <button id="btn-ok" class="btn btn-outline" onclick="markRead()">Done / Next</button>
+                    </div>
+                </div>
+            </div>
+            <div class="sidebar-placeholder" id="sidebar-placeholder">
+                <p>Select an email to view details</p>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Activity Log (Bottom) -->
+    <div class="console-drawer" id="console-drawer">
+        <div class="console-header" onclick="toggleConsole()">
+            <span>Activity Log</span>
+            <span class="toggle-icon">▲</span>
+        </div>
+        <div class="console-body" id="console-body">
+            <!-- Logs inject here -->
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 1rem;">Login to Robert</h2>
+            <p style="margin-bottom: 1.5rem; color: #a0a0a0;">Please enter your Gmail and App Password.</p>
+            <form onsubmit="event.preventDefault(); saveCredentials();">
+                <input type="email" id="email-user" placeholder="Email Address" autocomplete="email" required>
+                <input type="password" id="email-pass" placeholder="App Password" autocomplete="current-password"
+                    required>
+                <button type="submit" class="btn btn-outline">Connect</button>
+            </form>
+            <p class="error-msg" id="login-error"></p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
