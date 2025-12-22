@@ -44,11 +44,51 @@ async function fetchLogs() {
     try {
         const response = await fetch('/api/logs');
         if (response.ok) {
-            const logs = await response.json();
+            const data = await response.json();
+            // Handle both legacy (array) and new (object) formats for safety
+            const logs = Array.isArray(data) ? data : (data.logs || []);
+            const stats = data.stats || {};
+
             renderLogs(logs);
+            renderStats(stats);
         }
     } catch (e) {
         console.error("Error fetching logs", e);
+    }
+}
+
+function renderStats(stats) {
+    const badge = document.getElementById('skipped-badge');
+    if (stats.skipped_total !== undefined && stats.skipped_total > 0) {
+        badge.innerText = `(${stats.skipped_total} Skipped)`;
+        badge.style.display = 'inline';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+async function loadEmail(id) {
+    if (!id) return;
+
+    // UI Feedback
+    const feed = document.getElementById('email-feed');
+    feed.innerHTML = '<div class="loading"><div class="spinner"></div><p>Fetching email details...</p></div>';
+
+    try {
+        const response = await fetch(`/api/email/${id}`);
+        if (!response.ok) throw new Error("Failed to fetch");
+
+        const email = await response.json();
+
+        // Override current emails list to show this one
+        emails = [email];
+        currentEmailIndex = 0;
+
+        renderCurrentEmail();
+
+    } catch (e) {
+        console.error("Error loading email", e);
+        feed.innerHTML = `<div class="empty-state"><h2>Error</h2><p>Could not load email details.</p></div>`;
     }
 }
 
@@ -59,6 +99,12 @@ function renderLogs(logs) {
     logs.forEach(entry => {
         const div = document.createElement('div');
         div.className = 'log-entry';
+
+        // Add click handler if ID exists
+        if (entry.id) {
+            div.onclick = () => loadEmail(entry.id);
+            div.title = "Click to view email";
+        }
 
         const timeStr = new Date(entry.timestamp * 1000).toLocaleTimeString();
 
@@ -205,36 +251,19 @@ async function updateMemory() {
     });
 }
 
-function showLoginModal(msg = "") {
+function showLoginModal(message) {
     const modal = document.getElementById('login-modal');
+    const msgEl = document.getElementById('login-error');
+    if (message) {
+        msgEl.innerText = message;
+    } else {
+        msgEl.innerText = "";
+    }
     modal.classList.remove('hidden');
-    if (msg) {
-        document.getElementById('login-error').innerText = msg;
-    }
-}
-
-function saveCredentials() {
-    const user = document.getElementById('email-user').value;
-    const pass = document.getElementById('email-pass').value;
-
-    if (!user || !pass) {
-        document.getElementById('login-error').innerText = "Please fill in all fields";
-        return;
-    }
-
-    document.cookie = `email_user=${encodeURIComponent(user)}; path=/; max-age=31536000`;
-    document.cookie = `email_pass=${encodeURIComponent(pass)}; path=/; max-age=31536000`;
-
-    document.getElementById('login-modal').classList.add('hidden');
-    document.querySelector('.loading').innerHTML = `<div class="spinner"></div><p>Robert is checking your mail...</p>`;
-    fetchEmails();
-    fetchLogs();
 }
 
 function logout() {
-    document.cookie = "email_user=; path=/; max-age=0";
-    document.cookie = "email_pass=; path=/; max-age=0";
-    location.reload();
+    window.location.href = '/auth/logout';
 }
 
 function getCookie(name) {

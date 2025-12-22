@@ -26,8 +26,10 @@
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="user-profile" id="user-profile">
-                <span id="user-email-display">Not logged in</span>
+                <span id="user-email-display">{{ user if user else 'Not logged in' }}</span>
+                {% if user %}
                 <button class="btn-logout" onclick="logout()">Logout</button>
+                {% endif %}
             </div>
 
             <div class="sidebar-content hidden" id="sidebar-content">
@@ -65,11 +67,12 @@
     <!-- Activity Log (Bottom) -->
     <div class="console-drawer" id="console-drawer">
         <div class="console-header" onclick="toggleConsole()">
-            <span>Activity Log</span>
-            <span class="toggle-icon">▲</span>
+            <span>Activity Log <span id="skipped-badge"
+                    style="display:none; margin-left:10px; color:#CF6679; font-size:0.7rem;">(0 Skipped)</span></span>
+            <span class="toggle-icon">^</span>
         </div>
         <div class="console-body" id="console-body">
-            <!-- Logs inject here -->
+            <!-- Logs will be injected here -->
         </div>
     </div>
 
@@ -78,12 +81,13 @@
         <div class="modal-content">
             <h2 style="margin-bottom: 1rem;">Login to Robert</h2>
             <p style="margin-bottom: 1.5rem; color: #a0a0a0;">Please enter your Gmail and App Password.</p>
-            <form onsubmit="event.preventDefault(); saveCredentials();">
-                <input type="email" id="email-user" placeholder="Email Address" autocomplete="email" required>
-                <input type="password" id="email-pass" placeholder="App Password" autocomplete="current-password"
-                    required>
-                <button type="submit" class="btn btn-outline">Connect</button>
-            </form>
+            <div style="display: flex; justify-content: center;">
+                <a href="/auth/google" class="google-btn">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="G"
+                        style="width: 20px; margin-right: 10px;">
+                    Sign in with Google
+                </a>
+            </div>
             <p class="error-msg" id="login-error"></p>
         </div>
     </div>

@@ -2,3 +2,6 @@ flask
 python-dotenv
 google-generativeai
 beautifulsoup4
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

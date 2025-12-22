@@ -1,158 +1,176 @@
-import imaplib
-import email
-from email.header import decode_header
-from bs4 import BeautifulSoup
-from config import Config
+import base64
+from email.utils import parsedate_to_datetime
+from googleapiclient.discovery import build
 import logging
 
 class EmailClient:
     def __init__(self):
-        # No shared state for connection to avoid race conditions
         pass
 
-    def _get_connection(self, email_user, email_pass):
-        if not email_user or not email_pass:
-            raise ValueError("Email credentials not provided.")
-        
-        mail = imaplib.IMAP4_SSL(Config.IMAP_SERVER)
-        mail.login(email_user, email_pass)
-        return mail
+    def _get_service(self, credentials):
+        return build('gmail', 'v1', credentials=credentials)
 
-    def fetch_unread_emails(self, email_user, email_pass, limit=10, exclude_ids=None):
-        mail = None
+    def fetch_unread_emails(self, credentials, limit=10, exclude_ids=None):
         try:
-            mail = self._get_connection(email_user, email_pass)
+            service = self._get_service(credentials)
             
-            mail.select("inbox")
-            # Use UID search for stable IDs
-            status, messages = mail.uid('search', None, "UNSEEN")
+            # List unread messages
+            results = service.users().messages().list(userId='me', q='is:unread', maxResults=limit + (len(exclude_ids) if exclude_ids else 0)).execute()
+            messages = results.get('messages', [])
             
-            # Helper to handle empty search results safely
-            if not messages or not messages[0]:
+            if not messages:
                 return []
-
-            email_ids = messages[0].split()
             
-            # Filter out excluded IDs (already in buffer)
+            # Filter excluded IDs
             if exclude_ids:
-                # ids are bytes in email_ids, but exclude_ids are likely strings
                 exclude_set = set(exclude_ids)
-                email_ids = [eid for eid in email_ids if eid.decode() not in exclude_set]
+                messages = [m for m in messages if m['id'] not in exclude_set]
+            
+            # Respect limit after filtering
+            messages = messages[:limit]
             
             emails = []
-
-            # If no emails left after filtering, return empty
-            if not email_ids:
-                return []
-
-            # Process latest emails first
-            for e_id in reversed(email_ids[-limit:]):
-                # Use UID fetch
-                res, msg_data = mail.uid('fetch', e_id, "(BODY.PEEK[])")
-                for response_part in msg_data:
-                    if isinstance(response_part, tuple):
-                        msg = email.message_from_bytes(response_part[1])
+            for msg in messages:
+                # Get full message details
+                msg_detail = service.users().messages().get(userId='me', id=msg['id'], format='full').execute()
+                
+                payload = msg_detail.get('payload', {})
+                headers = payload.get('headers', [])
+                
+                subject = "No Subject"
+                sender = "Unknown Sender"
+                date_str = ""
+                
+                for h in headers:
+                    name = h.get('name', '').lower()
+                    if name == 'subject':
+                        subject = h.get('value')
+                    elif name == 'from':
+                        sender = h.get('value')
+                    elif name == 'date':
+                        date_str = h.get('value')
+                
+                body = self._get_body_from_payload(payload)
                         
-                        # Decode subject
-                        subject_header = msg["Subject"]
-                        if subject_header:
-                            subject, encoding = decode_header(subject_header)[0]
-                            if isinstance(subject, bytes):
-                                subject = subject.decode(encoding if encoding else "utf-8")
-                        else:
-                            subject = "(No Subject)"
-                        
-                        # Decode sender
-                        from_header = msg.get("From")
-                        if from_header:
-                            from_val, encoding = decode_header(from_header)[0]
-                            if isinstance(from_val, bytes):
-                                from_ = from_val.decode(encoding if encoding else "utf-8")
-                            else:
-                                from_ = from_val
-                        else:
-                            from_ = "Unknown Sender"
-                        
-                        # Get body
-                        body = ""
-                        html_body = None
-                        
-                        if msg.is_multipart():
-                            for part in msg.walk():
-                                content_type = part.get_content_type()
-                                content_disposition = str(part.get("Content-Disposition"))
-                                
-                                if "attachment" in content_disposition:
-                                    continue
-
-                                payload = part.get_payload(decode=True)
-                                if not payload: 
-                                    continue
-                                    
-                                try:
-                                    text = payload.decode()
-                                except:
-                                    text = payload.decode('latin-1') # Fallback
-                                    
-                                if content_type == "text/plain":
-                                    body += text
-                                elif content_type == "text/html":
-                                    html_body = text
-                        else:
-                            payload = msg.get_payload(decode=True)
-                            if payload:
-                                try:
-                                    text = payload.decode()
-                                except:
-                                    text = payload.decode('latin-1')
-                                
-                                if msg.get_content_type() == "text/html":
-                                    html_body = text
-                                else:
-                                    body = text
-
-                        # Prioritize HTML if available, otherwise use plain text
-                        final_body = html_body if html_body else body
-
-                        emails.append({
-                            "id": e_id.decode(), # This is the UID
-                            "subject": subject,
-                            "sender": from_,
-                            "body": final_body[:50000],  # Increase limit for HTML
-                            "date": msg.get("Date")
-                        })
+                emails.append({
+                    "id": msg['id'],
+                    "subject": subject,
+                    "sender": sender,
+                    "body": body[:50000],  # Truncate large bodies
+                    "date": date_str
+                })
+                
             return emails
+
         except Exception as e:
             logging.error(f"Error fetching emails: {e}")
             raise e
-        finally:
-            if mail:
-                try:
-                    mail.close()
-                except:
-                    pass
-                try:
-                    mail.logout()
-                except:
-                    pass
 
-    def mark_as_read(self, email_id, email_user, email_pass):
-        mail = None
+    def _get_body_from_payload(self, payload):
+        """Recursively extract text/html or text/plain from payload"""
+        body = ""
+        mime_type = payload.get('mimeType')
+        
+        # If it's a simple text part
+        if mime_type == 'text/plain' or mime_type == 'text/html':
+             if payload.get('body') and payload['body'].get('data'):
+                 return base64.urlsafe_b64decode(payload['body']['data']).decode(errors='replace')
+        
+        # If it has parts, recurse
+        if 'parts' in payload:
+            # We want to prioritize HTML over Plain Text
+            # But parts can be nested. 
+            
+            # Strategy: look for HTML in any part (recursively), if found return it.
+            # Else look for Plain in any part.
+            
+            # DFS for HTML
+            for part in payload['parts']:
+                if part.get('mimeType') == 'text/html':
+                    if part.get('body') and part['body'].get('data'):
+                        return base64.urlsafe_b64decode(part['body']['data']).decode(errors='replace')
+                
+                # Recurse if multipart
+                if 'parts' in part:
+                     candidate = self._get_body_from_payload(part)
+                     # If we found something good (assuming HTML is likely if it returned non-empty)
+                     # But simple recursion might return plain text from a sub-part.
+                     # This logic is a bit tricky. 
+                     
+                     # Better separate: find html part, find text part
+                     pass
+            
+            # If we are here, we didn't find a direct text/html child with data.
+            # Let's do a more structured search.
+            
+            html_body = self._find_part(payload, 'text/html')
+            if html_body:
+                return html_body
+                
+            text_body = self._find_part(payload, 'text/plain')
+            if text_body:
+                return text_body
+                
+        # Handle case where body is at top level but mimetype isn't explicit or we missed it
+        if payload.get('body') and payload['body'].get('data'):
+             return base64.urlsafe_b64decode(payload['body']['data']).decode(errors='replace')
+             
+        return ""
+
+    def _find_part(self, payload, target_mime_type):
+        """DFS to find a specific mime type"""
+        if payload.get('mimeType') == target_mime_type:
+            if payload.get('body') and payload['body'].get('data'):
+                return base64.urlsafe_b64decode(payload['body']['data']).decode(errors='replace')
+        
+        if 'parts' in payload:
+            for part in payload['parts']:
+                found = self._find_part(part, target_mime_type)
+                if found:
+                    return found
+        return None
+
+    def mark_as_read(self, email_id, credentials):
         try:
-            mail = self._get_connection(email_user, email_pass)
-            mail.select("inbox")
-            # Use UID store
-            mail.uid('store', email_id, "+FLAGS", "\\Seen")
+            service = self._get_service(credentials)
+            service.users().messages().modify(
+                userId='me',
+                id=email_id,
+                body={'removeLabelIds': ['UNREAD']}
+            ).execute()
         except Exception as e:
             logging.error(f"Error marking as read: {e}")
             raise e
-        finally:
-            if mail:
-                try:
-                    mail.close()
-                except:
-                    pass
-                try:
-                    mail.logout()
-                except:
-                    pass
+    def fetch_email_by_id(self, email_id, credentials):
+        try:
+            service = self._get_service(credentials)
+            msg_detail = service.users().messages().get(userId='me', id=email_id, format='full').execute()
+            
+            payload = msg_detail.get('payload', {})
+            headers = payload.get('headers', [])
+            
+            subject = "No Subject"
+            sender = "Unknown Sender"
+            date_str = ""
+            
+            for h in headers:
+                name = h.get('name', '').lower()
+                if name == 'subject':
+                    subject = h.get('value')
+                elif name == 'from':
+                    sender = h.get('value')
+                elif name == 'date':
+                    date_str = h.get('value')
+            
+            body = self._get_body_from_payload(payload)
+                    
+            return {
+                "id": msg_detail['id'],
+                "subject": subject,
+                "sender": sender,
+                "body": body[:50000], 
+                "date": date_str
+            }
+        except Exception as e:
+            logging.error(f"Error fetching email {email_id}: {e}")
+            raise e
