@@ -15,12 +15,33 @@
 <body>
     <div class="app-container">
         <!-- Main Email List Area -->
-        <main class="email-feed" id="email-feed">
-            <div class="loading">
-                <div class="spinner"></div>
-                <p>Robert is checking your mail...</p>
+        <main class="email-container" id="email-container">
+            <div id="email-list-view" class="email-list-view">
+                <div class="email-list-header">
+                    <h2>Inbox</h2>
+                    <div style="width: fit-content;">
+                        <button class="btn btn-outline btn-sm" onclick="fetchEmails()">Refresh</button>
+                    </div>
+                </div>
+                <div class="loading" id="list-loading">
+                    <div class="spinner"></div>
+                    <p>Robert is checking your mail...</p>
+                </div>
+                <div id="email-list-content" class="email-list-content">
+                    <!-- Email rows inject here -->
+                </div>
+                
+                <div id="email-reader-view" class="email-reader-view hidden">
+                    <div class="reader-toolbar">
+                        <div style="width: fit-content;">
+                            <button class="btn btn-back" onclick="showListView()">← Back to Inbox</button>
+                        </div>
+                    </div>
+                    <div id="email-reader-content">
+                        <!-- Email content injects here -->
+                    </div>
+                </div>
             </div>
-            <!-- Emails inject here -->
         </main>
 
         <!-- Sidebar -->

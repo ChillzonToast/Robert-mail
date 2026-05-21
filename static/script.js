@@ -32,11 +32,14 @@ async function fetchEmails(excludeId = null) {
             emails = [];
         }
 
-        currentEmailIndex = 0;
-        renderCurrentEmail();
+        renderEmailsList();
+        
+        // Hide loading
+        document.getElementById('list-loading').style.display = 'none';
 
     } catch (e) {
         console.error("Error fetching emails", e);
+        document.getElementById('list-loading').innerHTML = "<p>Error loading emails.</p>";
     }
 }
 
@@ -71,8 +74,9 @@ async function loadEmail(id) {
     if (!id) return;
 
     // UI Feedback
-    const feed = document.getElementById('email-feed');
-    feed.innerHTML = '<div class="loading"><div class="spinner"></div><p>Fetching email details...</p></div>';
+    showListView();
+    document.getElementById('list-loading').style.display = 'block';
+    document.getElementById('email-list-content').innerHTML = '';
 
     try {
         const response = await fetch(`/api/email/${id}`);
@@ -82,13 +86,16 @@ async function loadEmail(id) {
 
         // Override current emails list to show this one
         emails = [email];
-        currentEmailIndex = 0;
-
-        renderCurrentEmail();
+        renderEmailsList();
+        document.getElementById('list-loading').style.display = 'none';
+        
+        // Automatically open it since user clicked a log
+        showReaderView(email.id);
 
     } catch (e) {
         console.error("Error loading email", e);
-        feed.innerHTML = `<div class="empty-state"><h2>Error</h2><p>Could not load email details.</p></div>`;
+        document.getElementById('list-loading').style.display = 'none';
+        document.getElementById('email-list-content').innerHTML = `<div class="empty-state"><h2>Error</h2><p>Could not load email details.</p></div>`;
     }
 }
 
@@ -124,49 +131,93 @@ function renderLogs(logs) {
     });
 }
 
-function renderCurrentEmail() {
-    const feed = document.getElementById('email-feed');
-    feed.innerHTML = '';
-
+function renderEmailsList() {
+    const listContent = document.getElementById('email-list-content');
+    listContent.innerHTML = '';
+    
     if (emails.length === 0) {
-        feed.innerHTML = `
+        listContent.innerHTML = `
             <div class="empty-state">
                 <h2>No Unread Emails</h2>
                 <p>You are all caught up!</p>
-                <button class="btn btn-outline" onclick="fetchEmails()">Refresh</button>
             </div>`;
-
-        document.getElementById('sidebar-content').classList.add('hidden');
-        document.getElementById('sidebar-placeholder').style.display = 'block';
         return;
     }
+    
+    emails.forEach(email => {
+        const row = document.createElement('div');
+        row.className = 'email-row';
+        row.onclick = () => showReaderView(email.id);
+        
+        const summarySnippet = email.summary || email.body.substring(0, 50) + '...';
+        
+        row.innerHTML = `
+            <div class="sender">${email.sender}</div>
+            <div class="subject-snippet">
+                <span class="subject">${email.subject}</span>
+                <span class="snippet">- ${summarySnippet}</span>
+            </div>
+            <div class="date">${email.date || ''}</div>
+        `;
+        listContent.appendChild(row);
+    });
+}
 
-    // We always only have 1 email now [0]
-    const email = emails[0];
+function showListView() {
+    document.getElementById('email-list-content').classList.remove('hidden');
+    document.getElementById('email-reader-view').classList.add('hidden');
+    
+    // Reset Sidebar
+    const content = document.getElementById('sidebar-content');
+    content.classList.add('hidden');
+    content.style.display = ''; // Clear any inline block style
+    document.getElementById('sidebar-placeholder').style.display = 'block';
+}
 
-    // Render Email Card
-    const card = document.createElement('div');
-    card.className = 'email-reader';
-    card.innerHTML = `
-        <div class="email-reader-header">
-            <h1>${email.subject}</h1>
-            <div class="meta">
-                <span class="sender">${email.sender}</span>
-                <span class="date">${email.date}</span>
-                <span class="category-tag">${email.category}</span>
+function showReaderView(emailId) {
+    const email = emails.find(e => e.id === emailId);
+    if (!email) return;
+    
+    document.getElementById('email-list-content').classList.add('hidden');
+    document.getElementById('email-reader-view').classList.remove('hidden');
+    
+    const readerContent = document.getElementById('email-reader-content');
+    readerContent.innerHTML = `
+        <div class="email-reader-scroll">
+            <div class="email-reader">
+                <div class="email-reader-header">
+                    <h1>${email.subject}</h1>
+                    <div class="meta">
+                        <span class="sender">${email.sender}</span>
+                        <span class="date">${email.date || ''}</span>
+                        <span class="category-tag">${email.category || 'General'}</span>
+                    </div>
+                </div>
+                <div class="email-reader-body" style="padding: 0;">
+                    <iframe id="email-iframe" scrolling="no" style="width: 100%; border: none; overflow: hidden; min-height: 200px;" sandbox="allow-same-origin allow-popups"></iframe>
+                </div>
             </div>
         </div>
-        <div class="email-reader-body">
-            ${formatBody(email.body)}
-        </div>
     `;
-    feed.appendChild(card);
+    
+    // Set srcdoc and auto-resize iframe to avoid inner scrollbars
+    const iframe = document.getElementById('email-iframe');
+    iframe.onload = function() {
+        if (iframe.contentWindow && iframe.contentWindow.document) {
+            // Set height to scrollHeight + a little padding
+            iframe.style.height = (iframe.contentWindow.document.documentElement.scrollHeight + 20) + 'px';
+        }
+    };
+    iframe.srcdoc = formatBody(email.body);
+    
+    // Store current email globally for actions
+    window.currentViewingEmail = email;
 
     // Update Sidebar
     document.getElementById('sidebar-placeholder').style.display = 'none';
     const content = document.getElementById('sidebar-content');
     content.classList.remove('hidden');
-    content.style.display = 'block';
+    content.style.display = ''; // Clear any inline none style
 
     document.getElementById('summary-text').innerText = email.summary || "No summary available.";
 
@@ -221,24 +272,35 @@ function formatBody(text) {
 
 // Just one main action: Done/Next
 async function markRead() {
-    const email = emails[0];
+    const email = window.currentViewingEmail;
     if (!email) return;
 
-    document.getElementById('email-feed').innerHTML = '<div class="loading"><div class="spinner"></div><p>Processing...</p></div>';
+    document.getElementById('email-reader-content').innerHTML = '<div class="loading"><div class="spinner"></div><p>Processing...</p></div>';
 
     // Update memory if user typed something
     updateMemory();
 
     // Mark as done (Pop from buffer & Mark Read)
-    // Fire and forget (don't await)
+    // Fire and forget
     fetch('/api/mark_done', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: email.id })
     }).catch(e => console.error("Error marking done:", e));
 
-    // Immediately fetch next email (excluding current one to prevent race)
-    fetchEmails(email.id);
+    // Remove the current email from the local list
+    emails = emails.filter(e => e.id !== email.id);
+
+    // Replenish the list in the background
+    fetchEmails();
+
+    // If there is another email in the list, automatically open it
+    if (emails.length > 0) {
+        showReaderView(emails[0].id);
+    } else {
+        // Otherwise return to the list view
+        showListView();
+    }
 }
 async function updateMemory() {
     const text = document.getElementById('memory-input').value;
@@ -282,6 +344,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Poll logs every 5 seconds
     setInterval(fetchLogs, 5000);
+    // Poll emails every 10 seconds
+    setInterval(fetchEmails, 10000);
 });
 
 function toggleConsole() {

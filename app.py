@@ -35,9 +35,11 @@ class UserManager:
         self.stats_file = f"data/{email}/stats.json"
         self.lock = threading.Lock()
         self.running = True
-        
         self.stats = {"skipped_total": 0}
         self.load_stats()
+        
+        self.needs_reevaluation = False
+
         
         # Load credentials if not provided
         if not self.credentials:
@@ -152,8 +154,34 @@ class UserManager:
                     time.sleep(60)
                     continue
 
-                # Maintain buffer size of 10
-                if len(self.buffer) < 10:
+                if getattr(self, 'needs_reevaluation', False):
+                    self.needs_reevaluation = False
+                    logging.info(f"Re-evaluating buffer for {self.email} due to memory update")
+                    with self.lock:
+                        items_to_check = list(self.buffer)
+                        self.buffer = []
+                    
+                    for email in items_to_check:
+                        analysis = self.robert.process_email(email)
+                        email.update(analysis)
+                        if email.get('skip', False):
+                            logging.info(f"Skipping {email['subject']} (Reason: {email.get('reason')}) after re-eval")
+                            self.log_action("SKIPPED", email)
+                            try:
+                                self.client.mark_as_read(email['id'], self.credentials)
+                            except Exception as e:
+                                logging.error(f"Failed to mark as read: {e}")
+                        else:
+                            with self.lock:
+                                self.buffer.append(email)
+                    
+                    with self.lock:
+                        self.save_buffer()
+                    
+                    continue
+
+                # Maintain buffer size of 30
+                if len(self.buffer) < 30:
                     with self.lock:
                         current_ids = [e['id'] for e in self.buffer]
                         
@@ -161,14 +189,14 @@ class UserManager:
                     # Pass credentials instead of password
                     new_emails = self.client.fetch_unread_emails(
                         self.credentials, 
-                        limit=10, 
+                        limit=30, 
                         exclude_ids=current_ids
                     )
                     
                     if new_emails:
                         added_count = 0
                         for email in new_emails:
-                            if len(self.buffer) >= 10:
+                            if len(self.buffer) >= 30:
                                 break
                                 
                             # Double check duplicate
@@ -311,20 +339,13 @@ def get_emails():
         # Check for exclude_id (optimization for non-blocking UI)
         exclude_id = request.args.get('exclude_id')
         
-        email = None
+        emails_to_return = []
         with manager.lock:
-            if manager.buffer:
-                if exclude_id and len(manager.buffer) > 0 and manager.buffer[0]['id'] == exclude_id:
-                     # If the top email is the one we are "pretending" is gone, return the next one
-                     if len(manager.buffer) > 1:
-                         email = manager.buffer[1]
-                else:
-                    email = manager.buffer[0]
+            emails_to_return = list(manager.buffer)
+            if exclude_id:
+                emails_to_return = [e for e in emails_to_return if e['id'] != exclude_id]
         
-        if email:
-            return jsonify({"emails": [email], "skipped": []})
-        else:
-            return jsonify({"emails": [], "skipped": []}) # buffer empty or fetching
+        return jsonify({"emails": emails_to_return, "skipped": []})
 
     except Exception as e:
         logging.error(f"Fetch Error: {e}")
@@ -390,6 +411,7 @@ def update_memory():
     text = data.get('text')
     if text:
         manager.robert.update_memory(text)
+        manager.needs_reevaluation = True
         
     return jsonify({"status": "success"})
 
